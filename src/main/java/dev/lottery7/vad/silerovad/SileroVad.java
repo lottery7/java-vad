@@ -1,13 +1,15 @@
-package dev.lottery7.silerovad;
+package dev.lottery7.vad.silerovad;
 
 import ai.onnxruntime.OrtException;
+import dev.lottery7.vad.VoiceActivityDetector;
+import dev.lottery7.util.AudioUtils;
 
-public class SileroVadDetector implements AutoCloseable {
+public class SileroVad implements AutoCloseable, VoiceActivityDetector {
     private final SileroVadOnnxModel model;
     private final float speechThreshold;
     private final int sampleRate;
 
-    public SileroVadDetector(SileroVadOnnxModel model, float speechThreshold, int sampleRate) {
+    public SileroVad(SileroVadOnnxModel model, float speechThreshold, int sampleRate) {
         if (!validateSampleRate(sampleRate)) {
             throw new IllegalArgumentException("Invalid sample rate. See DOCS for more info.");
         }
@@ -30,12 +32,7 @@ public class SileroVadDetector implements AutoCloseable {
 
 
     private float[][] prepareAudioBytes(byte[] audioBytes) {
-        int n = audioBytes.length / 2;
-        float[][] audioData = new float[1][n];
-        for (int i = 0; i < n; i++) {
-            audioData[0][i] = ((audioBytes[i * 2] & 0xff) | (audioBytes[i * 2 + 1] << 8)) / 32767.0f;
-        }
-        return audioData;
+        return new float[][]{AudioUtils.convertAudioBytesToUnitFloats(audioBytes)};
     }
 
     private SileroVadOnnxModel.ModelInput prepareInput(byte[] audioBytes) {
@@ -44,7 +41,8 @@ public class SileroVadDetector implements AutoCloseable {
         return new SileroVadOnnxModel.ModelInput(audioData, sampleRate);
     }
 
-    public boolean apply(byte[] audioBytes) {
+    @Override
+    public boolean detect(byte[] audioBytes) {
         if (!validateAudioBytes(audioBytes)) {
             throw new IllegalArgumentException(
                     "Invalid input size: has to be 512 bytes for 8k SampleRate or 1024 bytes for 16k SampleRate.");

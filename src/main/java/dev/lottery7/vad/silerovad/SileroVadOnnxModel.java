@@ -1,4 +1,4 @@
-package dev.lottery7.silerovad;
+package dev.lottery7.vad.silerovad;
 
 import ai.onnxruntime.OnnxTensor;
 import ai.onnxruntime.OrtEnvironment;

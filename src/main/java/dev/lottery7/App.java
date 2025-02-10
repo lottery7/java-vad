@@ -1,106 +1,81 @@
 package dev.lottery7;
 
-import dev.lottery7.silerovad.SileroVadDetector;
-import dev.lottery7.silerovad.SileroVadOnnxModel;
-import dev.lottery7.util.AudioUtils;
+import dev.lottery7.transcriber.VoiceTranscriber;
+import dev.lottery7.transcriber.whisper.WhisperTranscriber;
+import dev.lottery7.vad.silerovad.SileroVad;
+import dev.lottery7.vad.silerovad.SileroVadOnnxModel;
+import org.apache.hc.client5.http.impl.classic.CloseableHttpClient;
+import org.apache.hc.client5.http.impl.classic.HttpClients;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import javax.sound.sampled.AudioFormat;
 import javax.sound.sampled.AudioSystem;
 import javax.sound.sampled.DataLine;
 import javax.sound.sampled.TargetDataLine;
-import java.io.ByteArrayOutputStream;
-import java.nio.file.Path;
-import java.util.ArrayList;
-import java.util.List;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
-import java.util.concurrent.Future;
+import java.util.concurrent.*;
 
 public class App {
-    private static final String MODEL_PATH = "models/silero_vad.onnx";
+    private static final String SILERO_VAD_MODEL_PATH = "models/silero-vad.onnx";
+    private static final String WHISPER_MODEL_PATH = "models/ggml-small.bin";
+
     private static final int SAMPLE_RATE = 16000;
-    private static final int BUFFER_SIZE = 1024;
     private static final float START_THRESHOLD = 0.5f;
-    private static final int SILENCE_MS = 500;
+    private static final Logger log = LoggerFactory.getLogger(App.class);
 
     public static void main(String[] args) throws Exception {
-        SileroVadOnnxModel model = new SileroVadOnnxModel(MODEL_PATH);
-        SileroVadDetector detector = new SileroVadDetector(model, START_THRESHOLD, SAMPLE_RATE);
+
+        log.info("Welcome to Realtime Voice Transcription! 🙌");
+        log.info("Loading...");
+
+
+        log.info("Silero VAD: ");
+
+        SileroVadOnnxModel vadModel = new SileroVadOnnxModel(SILERO_VAD_MODEL_PATH);
+        SileroVad detector = new SileroVad(vadModel, START_THRESHOLD, SAMPLE_RATE);
+
+        log.info("OK");
+
+
+        log.info("Whisper: ");
+
+        CloseableHttpClient client = HttpClients.createDefault();
+        VoiceTranscriber transcriber = new WhisperTranscriber("127.0.0.1", 8080, "/inference", client);
+
+        log.info("OK");
+
+
+        log.info("Microphone: ");
 
         AudioFormat format = new AudioFormat(SAMPLE_RATE, 16, 1, true, false);
         DataLine.Info info = new DataLine.Info(TargetDataLine.class, format);
 
-        TargetDataLine targetDataLine;
-        targetDataLine = (TargetDataLine) AudioSystem.getLine(info);
-        targetDataLine.open(format);
-        targetDataLine.start();
+        TargetDataLine targetDataLine = (TargetDataLine) AudioSystem.getLine(info);
 
-        boolean wasSpeech = false;
-        boolean triggered = false;
-        long timeSinceLastSpeech = 0;
+        try (client; targetDataLine; ExecutorService executorService = Executors.newFixedThreadPool(2)) {
 
-        ByteArrayOutputStream speechStream = new ByteArrayOutputStream();
+            targetDataLine.open(format);
+            targetDataLine.start();
 
-        int numSpeech = 0;
+            log.info("OK");
 
-        ExecutorService executorService = Executors.newCachedThreadPool();
 
-        List<Future<?>> futures = new ArrayList<>();
+            log.info("Loaded successfully! 👌");
+            log.info("You can speak now! 😁");
 
-        while (targetDataLine.isOpen()) {
-            byte[] data = new byte[BUFFER_SIZE];
 
-            int numBytesRead = targetDataLine.read(data, 0, data.length);
-            if (numBytesRead <= 0) {
-                System.err.println("Error reading data from target data line.");
-                continue;
+            BlockingQueue<TranscriptionTask> queue = new LinkedBlockingQueue<>();
+            Runnable producer = new AudioInputVoiceExtractor(queue, detector, targetDataLine);
+            Runnable consumer = new AudioInputVoiceTranscriber(queue, transcriber);
+
+            executorService.submit(producer);
+            executorService.submit(consumer);
+
+            while (!executorService.awaitTermination(1, TimeUnit.SECONDS)) {
             }
 
-            boolean speechDetected = detector.apply(data);
-
-            if (speechDetected) {
-                if (!triggered) {
-                    triggered = true;
-                    System.out.println("Speech started");
-                }
-                speechStream.write(data, 0, numBytesRead);
-
-                timeSinceLastSpeech = 0;
-                wasSpeech = true;
-
-            } else if (wasSpeech) {
-                if (timeSinceLastSpeech < SILENCE_MS) {
-                    speechStream.write(data, 0, numBytesRead);
-                }
-
-
-                long dt = AudioUtils.calculateDurationMillis(format, numBytesRead);
-                timeSinceLastSpeech += dt;
-
-                if (timeSinceLastSpeech >= SILENCE_MS && timeSinceLastSpeech - dt < SILENCE_MS) {
-                    System.out.println("Speech ended");
-                    triggered = false;
-
-                    speechStream.flush();
-                    byte[] speechBytes = speechStream.toByteArray();
-                    String speechPath = String.format("audio/speech%d.wav", numSpeech);
-
-                    futures.add(executorService.submit(() -> {
-                        AudioUtils.writeAudioToFile(format, speechBytes, Path.of(speechPath));
-                        return "Success";
-                    }));
-
-                    speechStream.reset();
-
-                    numSpeech += 1;
-                }
-            }
+            executorService.shutdownNow();
         }
 
-        for (var future : futures) {
-            future.get();
-        }
-
-        targetDataLine.close();
     }
 }
