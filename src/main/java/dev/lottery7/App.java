@@ -2,6 +2,7 @@ package dev.lottery7;
 
 import dev.lottery7.transcriber.VoiceTranscriber;
 import dev.lottery7.transcriber.whisper.WhisperTranscriber;
+import dev.lottery7.vad.VoiceActivityDetector;
 import dev.lottery7.vad.silerovad.SileroVad;
 import dev.lottery7.vad.silerovad.SileroVadOnnxModel;
 import org.apache.hc.client5.http.impl.classic.CloseableHttpClient;
@@ -16,8 +17,8 @@ import javax.sound.sampled.TargetDataLine;
 import java.util.concurrent.*;
 
 public class App {
-    private static final String SILERO_VAD_MODEL_PATH = "models/silero-vad.onnx";
-    private static final String WHISPER_MODEL_PATH = "models/ggml-small.bin";
+    private static final String SILERO_VAD_MODEL_PATH =
+            App.class.getClassLoader().getResource("silero-vad.onnx").getPath().substring(1);
 
     private static final int SAMPLE_RATE = 16000;
     private static final float START_THRESHOLD = 0.5f;
@@ -25,43 +26,65 @@ public class App {
 
     public static void main(String[] args) throws Exception {
 
-        log.info("Welcome to Realtime Voice Transcription! 🙌");
-        log.info("Loading...");
+        System.out.println("Welcome to Realtime Voice Transcription! 🙌");
+        System.out.println("Loading...");
 
 
-        log.info("Silero VAD: ");
+        System.out.print("Silero VAD: ");
 
-        SileroVadOnnxModel vadModel = new SileroVadOnnxModel(SILERO_VAD_MODEL_PATH);
-        SileroVad detector = new SileroVad(vadModel, START_THRESHOLD, SAMPLE_RATE);
+        VoiceActivityDetector detector;
+        try {
+            SileroVadOnnxModel vadModel = new SileroVadOnnxModel(SILERO_VAD_MODEL_PATH);
+            detector = new SileroVad(vadModel, START_THRESHOLD, SAMPLE_RATE);
+        } catch (Throwable e) {
+            System.out.println("Failed");
+            log.error("Error: ", e);
+            return;
+        }
 
-        log.info("OK");
+        System.out.println("OK");
 
 
-        log.info("Whisper: ");
+        System.out.print("Whisper: ");
 
-        CloseableHttpClient client = HttpClients.createDefault();
-        VoiceTranscriber transcriber = new WhisperTranscriber("127.0.0.1", 8080, "/inference", client);
+        VoiceTranscriber transcriber;
+        CloseableHttpClient client;
+        try {
+            client = HttpClients.createDefault();
+            transcriber = new WhisperTranscriber("127.0.0.1", 8080, client);
+        } catch (Throwable e) {
+            System.out.println("Failed");
+            log.error("Error: ", e);
+            return;
+        }
 
-        log.info("OK");
+        System.out.println("OK");
 
 
-        log.info("Microphone: ");
+        System.out.print("Microphone: ");
 
-        AudioFormat format = new AudioFormat(SAMPLE_RATE, 16, 1, true, false);
-        DataLine.Info info = new DataLine.Info(TargetDataLine.class, format);
-
-        TargetDataLine targetDataLine = (TargetDataLine) AudioSystem.getLine(info);
+        AudioFormat format;
+        TargetDataLine targetDataLine;
+        try {
+            format = new AudioFormat(SAMPLE_RATE, 16, 1, true, false);
+            DataLine.Info info = new DataLine.Info(TargetDataLine.class, format);
+            targetDataLine = (TargetDataLine) AudioSystem.getLine(info);
+        } catch (Throwable e) {
+            System.out.println("Failed");
+            log.error("Error: ", e);
+            return;
+        }
 
         try (client; targetDataLine; ExecutorService executorService = Executors.newFixedThreadPool(2)) {
 
             targetDataLine.open(format);
             targetDataLine.start();
 
-            log.info("OK");
+            System.out.println("OK");
 
 
-            log.info("Loaded successfully! 👌");
-            log.info("You can speak now! 😁");
+            System.out.println("Loaded successfully! 👌");
+            System.out.println("You can speak now! 😁");
 
 
             BlockingQueue<TranscriptionTask> queue = new LinkedBlockingQueue<>();

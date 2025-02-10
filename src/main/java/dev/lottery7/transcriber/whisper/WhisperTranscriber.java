@@ -20,10 +20,9 @@ public class WhisperTranscriber implements VoiceTranscriber {
     private final HttpClient client;
     private final String url;
 
-    public WhisperTranscriber(String host, int port, String path, HttpClient client) {
+    public WhisperTranscriber(String host, int port, HttpClient client) {
         this.client = client;
-        assert path.startsWith("/");
-        url = String.format("http://%s:%d%s", host, port, path);
+        url = String.format("http://%s:%d", host, port);
     }
 
     @Override
@@ -36,7 +35,7 @@ public class WhisperTranscriber implements VoiceTranscriber {
                 .addTextBody("temperature", "0.5")
                 .build();
 
-        HttpPost httpPost = new HttpPost(url);
+        HttpPost httpPost = new HttpPost(url + "/inference");
         httpPost.setEntity(httpEntity);
 
         try {
